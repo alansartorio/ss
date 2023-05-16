@@ -1343,6 +1343,7 @@ version = "0.1.0"
 dependencies = [
  "capturable_visualization",
  "gear_predictor_corrector",
+ "itertools",
  "nalgebra",
  "nannou",
  "ndarray",

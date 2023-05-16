@@ -11,3 +11,4 @@ nalgebra = { workspace = true }
 ndarray = { workspace = true }
 nannou = { workspace = true }
 capturable_visualization = { workspace = true }
+itertools = { workspace = true }
