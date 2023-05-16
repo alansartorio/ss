@@ -1,0 +1,13 @@
+[package]
+name = "mesh"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+gear_predictor_corrector = { workspace = true }
+nalgebra = { workspace = true }
+ndarray = { workspace = true }
+nannou = { workspace = true }
+capturable_visualization = { workspace = true }

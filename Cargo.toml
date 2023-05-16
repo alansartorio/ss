@@ -6,6 +6,7 @@ members = [
     "TP3/tp3",
     "TP4A/tp4a",
     "TP4B/tp4b",
+    "mesh",
     "utils/*",
 ]
 [workspace.dependencies]
