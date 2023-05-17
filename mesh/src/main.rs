@@ -7,7 +7,7 @@ use nalgebra::{
 use nannou::{color, prelude::*, App, Draw};
 use ndarray::{s, Array2, Axis};
 
-const K: f64 = 10e3;
+const K: f64 = 1e3;
 
 type Vector2 = nalgebra::Vector2<f64>;
 
@@ -16,13 +16,13 @@ fn link_force(position1: Vector2, position2: Vector2) -> Vector2 {
     let dist = delta.magnitude();
     let expansion = dist - 0.01;
     if expansion > 0.0 {
-        K * expansion * delta / dist
+        K * expansion * (delta / dist)
     } else {
         Vector2::zeros()
     }
 }
 
-const GRAVITY: f64 = 9.8;
+const GRAVITY: f64 = 9.8e-1;
 
 #[derive(Debug, Default)]
 struct MovingNode {
@@ -121,17 +121,21 @@ fn step(mesh_nodes: &mut Array2<Node>, cursor_pos: Vector2, dt: f64) {
         }
 
         // Gravity
-        accelerations[[y, x]] += Vector2::new(0.0, -GRAVITY);
+        accelerations[[y, x]] += Vector2::y() * -GRAVITY;
 
-        if let Node::Moving(MovingNode { weight, .. }) = node {
+        if let Node::Moving(MovingNode { weight, velocity, .. }) = node {
             //// Wind
             //accelerations[[y, x]] += Vector2::x() * 0.01 / *weight;
 
             // Cursor
             let delta = position - cursor_pos;
             if delta.magnitude_squared() < 0.03.powi(2) {
-                accelerations[[y, x]] += delta.try_normalize(0.001).unwrap_or(Vector2::x()) * 0.1 / *weight;
+                accelerations[[y, x]] +=
+                    delta.try_normalize(0.001).unwrap_or(Vector2::x()) * 0.1 / *weight;
             }
+
+            // Drag
+            accelerations[[y, x]] += -velocity * 0.03 / *weight;
         }
     }
     mesh_nodes.zip_mut_with(&accelerations, |mut node, acceleration| {
@@ -161,7 +165,7 @@ fn step(mesh_nodes: &mut Array2<Node>, cursor_pos: Vector2, dt: f64) {
 }
 
 fn update(app: &App, model: &mut Model, update: Update) {
-    const STEPS: usize = 1000;
+    const STEPS: usize = 100;
     let dt = update.since_last.as_secs_f64() / STEPS as f64;
     let cursor_pos = Vector2::new(app.mouse.x as f64, app.mouse.y as f64);
 
@@ -185,7 +189,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
         Point2::from_homogeneous(transform * Point2::from(cursor_pos).to_homogeneous())
             .unwrap()
             .coords;
-    for _ in 0..100 {
+    for _ in 0..STEPS {
         step(&mut model.mesh_nodes, cursor_pos, dt);
     }
 }
