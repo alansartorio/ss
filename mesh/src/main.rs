@@ -3,6 +3,7 @@ use std::ops::AddAssign;
 use capturable_visualization::VisualizationBuilder;
 use gear_predictor_corrector::{GearCorrector, GearPredictor};
 use nalgebra::{Matrix3, Point2, Scale2, Translation2};
+use nannou::state::mouse::ButtonPosition;
 use nannou::{color, prelude::*, App, Draw};
 use ndarray::parallel::prelude::*;
 use ndarray::{Array2, Axis, Zip};
@@ -17,12 +18,13 @@ fn link_force(position1: Vector2, position2: Vector2) -> Option<Vector2> {
     let expansion = dist - 0.1 / (MESH_SIZE - 1) as f64;
     if expansion > 0.0 {
         let force = K * expansion;
-        (force < 2.0).then(|| force * (delta / dist))
+        (force < 0.3).then(|| force * (delta / dist))
     } else {
         Some(Vector2::zeros())
     }
 }
 
+const INTERACTION_RADIUS: f64 = 0.03;
 const GRAVITY: f64 = 9.8e-1;
 
 #[derive(Debug, Default)]
@@ -51,13 +53,36 @@ fn main() {
     VisualizationBuilder::new(model)
         .update(update)
         .draw(draw)
+        .event(event)
         .run();
+}
+
+fn event(_app: &App, model: &mut Model, event: WindowEvent) {
+    match event {
+        Resized(size) => {
+            model.window_transform = {
+                let scale = 1.0 / {
+                    let h = 1.0;
+                    let w = 1.0;
+                    let (win_w, win_h) = (size.x as f64, size.y as f64);
+                    f64::min(win_w / w, win_h / h)
+                };
+
+                nalgebra::convert::<_, Matrix3<f64>>(Translation2::new(0.05, 0.0))
+                    * nalgebra::convert::<_, Matrix3<f64>>(Scale2::new(0.2, 0.2))
+                    * nalgebra::convert::<_, Matrix3<f64>>(Translation2::new(0.0, 0.5))
+                    * nalgebra::convert::<_, Matrix3<f64>>(Scale2::new(scale, scale))
+            }
+        }
+        _ => {}
+    }
 }
 
 struct Model {
     mesh_nodes: Array2<Node>,
     horizontal_edges: Array2<bool>,
     vertical_edges: Array2<bool>,
+    window_transform: Matrix3<f64>,
 }
 
 const MESH_SIZE: usize = 30;
@@ -85,6 +110,7 @@ fn initial_model() -> Model {
         mesh_nodes,
         horizontal_edges: Array2::from_shape_fn((MESH_SIZE, MESH_SIZE - 1), |_| true),
         vertical_edges: Array2::from_shape_fn((MESH_SIZE - 1, MESH_SIZE), |_| true),
+        window_transform: Matrix3::identity(),
     }
 }
 
@@ -98,7 +124,7 @@ fn step(
     mesh_nodes: &mut Array2<Node>,
     horizontal_edges: &mut Array2<bool>,
     vertical_edges: &mut Array2<bool>,
-    cursor_pos: Vector2,
+    cursor_pos: Option<Vector2>,
     dt: f64,
     time: f64,
 ) {
@@ -187,11 +213,14 @@ fn step(
                 //Vector2::x() * 0.002 * (0.5 + (1.0 + (time * 10.0).sin()) * 0.2) / *weight;
 
                 // Cursor
-                let delta = *position - cursor_pos;
-                let magnitude = delta.magnitude();
-                if magnitude > 0.0001 {
-                    *acceleration += (delta / magnitude)
-                        * (smoothstep(magnitude, 0.03, 0.0).powi(3) * 0.3 / *weight);
+                if let Some(cursor_pos) = cursor_pos {
+                    let delta = *position - cursor_pos;
+                    let magnitude = delta.magnitude();
+                    if magnitude > 0.0001 {
+                        *acceleration += (delta / magnitude)
+                            * (smoothstep(magnitude, INTERACTION_RADIUS, 0.0).powi(10) * 0.2
+                                / *weight);
+                    }
                 }
 
                 // Drag
@@ -227,30 +256,22 @@ fn step(
 }
 
 fn update(app: &App, model: &mut Model, update: Update) {
-    const STEPS: usize = 1000;
-    let dt = update.since_last.as_secs_f64() / STEPS as f64;
-    let cursor_pos = Vector2::new(app.mouse.x as f64, app.mouse.y as f64);
+    const STEPS: usize = 100;
+    let mut dt = update.since_last.as_secs_f64() / STEPS as f64;
+    const MAX_DT: f64 = 0.0002;
+    if dt > MAX_DT {
+        println!("slowing!");
+        //dbg!(dt);
+        dt = MAX_DT;
+    }
+    let cursor_pos = matches!(app.mouse.buttons.left(), ButtonPosition::Down(..))
+        .then(|| Vector2::new(app.mouse.x as f64, app.mouse.y as f64))
+        .map(|pos| {
+            Point2::from_homogeneous(model.window_transform * Point2::from(pos).to_homogeneous())
+                .unwrap()
+                .coords
+        });
 
-    let transform = {
-        let window = app.main_window();
-        let scale = 1.0 / {
-            let h = 1.0;
-            let w = 1.0;
-            let (win_w, win_h) = window.inner_size_pixels();
-            let win_w = win_w as f64;
-            let win_h = win_h as f64;
-            f64::min(win_w / w, win_h / h)
-        };
-
-        nalgebra::convert::<_, Matrix3<f64>>(Translation2::new(0.05, 0.0))
-            * nalgebra::convert::<_, Matrix3<f64>>(Scale2::new(0.2, 0.2))
-            * nalgebra::convert::<_, Matrix3<f64>>(Translation2::new(0.0, 0.5))
-            * nalgebra::convert::<_, Matrix3<f64>>(Scale2::new(scale, scale))
-    };
-    let cursor_pos =
-        Point2::from_homogeneous(transform * Point2::from(cursor_pos).to_homogeneous())
-            .unwrap()
-            .coords;
     for _ in 0..STEPS {
         step(
             &mut model.mesh_nodes,
@@ -263,7 +284,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
     }
 }
 
-fn draw(_app: &App, model: &Model, draw: &Draw) {
+fn draw(app: &App, model: &Model, draw: &Draw) {
     draw.background().color(BLACK);
     let draw = draw.x(0.5).scale(5.0).x(-0.05);
     for node in &model.mesh_nodes {
@@ -296,4 +317,15 @@ fn draw(_app: &App, model: &Model, draw: &Draw) {
                 .color(color::WHITE);
         }
     }
+    let mouse = Point2::from_homogeneous(
+        model.window_transform * Point2::new(app.mouse.x, app.mouse.y).cast().to_homogeneous(),
+    )
+    .unwrap()
+    .coords;
+    draw.ellipse()
+        .radius(INTERACTION_RADIUS as f32)
+        .resolution(20.0)
+        .x(mouse.x as f32)
+        .y(mouse.y as f32)
+        .color(rgba(1.0, 1.0, 1.0, 0.3));
 }
