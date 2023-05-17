@@ -1,6 +1,9 @@
 use capturable_visualization::VisualizationBuilder;
 use gear_predictor_corrector::{GearCorrector, GearPredictor};
 use itertools::Itertools;
+use nalgebra::{
+    Affine2, Isometry2, Matrix3, Point2, Scale, Scale2, Similarity2, Transform2, Translation2,
+};
 use nannou::{color, prelude::*, App, Draw};
 use ndarray::{s, Array2, Axis};
 
@@ -46,7 +49,7 @@ struct Model {
     mesh_nodes: Array2<Node>,
 }
 
-fn model(app: &App) -> Model {
+fn model(_app: &App) -> Model {
     let mesh_nodes = Array2::<Node>::from_shape_fn((11, 11), |(y, x)| {
         let position = Vector2::new(x as f64, y as f64) / 10.0 * 0.1 + Vector2::new(0.0, 0.1);
         if y == 10 {
@@ -63,7 +66,7 @@ fn model(app: &App) -> Model {
     Model { mesh_nodes }
 }
 
-fn step(mesh_nodes: &mut Array2<Node>, dt: f64) {
+fn step(mesh_nodes: &mut Array2<Node>, cursor_pos: Vector2, dt: f64) {
     for node in mesh_nodes.iter_mut() {
         if let Node::Moving(MovingNode {
             position,
@@ -120,9 +123,15 @@ fn step(mesh_nodes: &mut Array2<Node>, dt: f64) {
         // Gravity
         accelerations[[y, x]] += Vector2::new(0.0, -GRAVITY);
 
-        // Wind
         if let Node::Moving(MovingNode { weight, .. }) = node {
-            accelerations[[y, x]] += Vector2::new(0.01, 0.0) / *weight;
+            //// Wind
+            //accelerations[[y, x]] += Vector2::x() * 0.01 / *weight;
+
+            // Cursor
+            let delta = position - cursor_pos;
+            if delta.magnitude_squared() < 0.03.powi(2) {
+                accelerations[[y, x]] += delta.try_normalize(0.001).unwrap_or(Vector2::x()) * 0.1 / *weight;
+            }
         }
     }
     mesh_nodes.zip_mut_with(&accelerations, |mut node, acceleration| {
@@ -151,11 +160,33 @@ fn step(mesh_nodes: &mut Array2<Node>, dt: f64) {
     });
 }
 
-fn update(_app: &App, model: &mut Model, update: Update) {
+fn update(app: &App, model: &mut Model, update: Update) {
     const STEPS: usize = 1000;
     let dt = update.since_last.as_secs_f64() / STEPS as f64;
+    let cursor_pos = Vector2::new(app.mouse.x as f64, app.mouse.y as f64);
+
+    let transform = {
+        let window = app.main_window();
+        let scale = 1.0 / {
+            let h = 1.0;
+            let w = 1.0;
+            let (win_w, win_h) = window.inner_size_pixels();
+            let win_w = win_w as f64;
+            let win_h = win_h as f64;
+            f64::min(win_w / w, win_h / h)
+        };
+
+        nalgebra::convert::<_, Matrix3<f64>>(Translation2::new(0.05, 0.0))
+            * nalgebra::convert::<_, Matrix3<f64>>(Scale2::new(0.2, 0.2))
+            * nalgebra::convert::<_, Matrix3<f64>>(Translation2::new(0.0, 0.5))
+            * nalgebra::convert::<_, Matrix3<f64>>(Scale2::new(scale, scale))
+    };
+    let cursor_pos =
+        Point2::from_homogeneous(transform * Point2::from(cursor_pos).to_homogeneous())
+            .unwrap()
+            .coords;
     for _ in 0..100 {
-        step(&mut model.mesh_nodes, dt);
+        step(&mut model.mesh_nodes, cursor_pos, dt);
     }
 }
 
