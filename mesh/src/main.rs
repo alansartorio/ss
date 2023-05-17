@@ -1,11 +1,8 @@
 use capturable_visualization::VisualizationBuilder;
 use gear_predictor_corrector::{GearCorrector, GearPredictor};
-use itertools::Itertools;
-use nalgebra::{
-    Affine2, Isometry2, Matrix3, Point2, Scale, Scale2, Similarity2, Transform2, Translation2,
-};
+use nalgebra::{Matrix3, Point2, Scale2, Translation2};
 use nannou::{color, prelude::*, App, Draw};
-use ndarray::{s, Array2, Axis};
+use ndarray::Array2;
 
 const K: f64 = 1e3;
 
@@ -14,10 +11,10 @@ type Vector2 = nalgebra::Vector2<f64>;
 fn link_force(position1: Vector2, position2: Vector2) -> Option<Vector2> {
     let delta = position2 - position1;
     let dist = delta.magnitude();
-    let expansion = dist - 0.01;
+    let expansion = dist - 0.1 / (MESH_SIZE - 1) as f64;
     if expansion > 0.0 {
         let force = K * expansion;
-        (force < 1.0).then(|| force * (delta / dist))
+        (force < 2.0).then(|| force * (delta / dist))
     } else {
         Some(Vector2::zeros())
     }
@@ -52,10 +49,17 @@ struct Model {
     vertical_edges: Array2<bool>,
 }
 
+const MESH_SIZE: usize = 30;
+
 fn model(_app: &App) -> Model {
-    let mesh_nodes = Array2::<Node>::from_shape_fn((11, 11), |(y, x)| {
-        let position = Vector2::new(x as f64, y as f64) / 10.0 * 0.1 + Vector2::new(0.0, 0.1);
-        if y == 10 {
+    initial_model()
+}
+
+fn initial_model() -> Model {
+    let mesh_nodes = Array2::<Node>::from_shape_fn((MESH_SIZE, MESH_SIZE), |(y, x)| {
+        let position = Vector2::new(x as f64, y as f64) / (MESH_SIZE - 1) as f64 * 0.1
+            + Vector2::new(0.0, 0.1);
+        if y == MESH_SIZE - 1 {
             Node::Fixed { position }
         } else {
             Node::Moving(MovingNode {
@@ -68,9 +72,15 @@ fn model(_app: &App) -> Model {
 
     Model {
         mesh_nodes,
-        horizontal_edges: Array2::from_shape_fn((11, 10), |_| true),
-        vertical_edges: Array2::from_shape_fn((10, 11), |_| true),
+        horizontal_edges: Array2::from_shape_fn((MESH_SIZE, MESH_SIZE - 1), |_| true),
+        vertical_edges: Array2::from_shape_fn((MESH_SIZE - 1, MESH_SIZE), |_| true),
     }
+}
+
+fn smoothstep(x: f64, start: f64, end: f64) -> f64 {
+    let x = ((x - start) / (end - start)).clamp(0.0, 1.0);
+
+    x * x * (3.0 - 2.0 * x)
 }
 
 fn step(
@@ -115,7 +125,7 @@ fn step(
             (x + 1 < mesh_nodes.dim().1).then(|| (&mut horizontal_edges[[y, x]], [y, x + 1]));
         let up = (y + 1 < mesh_nodes.dim().0).then(|| (&mut vertical_edges[[y, x]], [y + 1, x]));
         // Link forces
-        for (edge, [ny, nx]) in [right, up].into_iter().flatten() {
+        for (edge, [ny, nx]) in [right, up].into_iter().flatten().filter(|(edge, _)| **edge) {
             let neighbor = &mesh_nodes[[ny, nx]];
             let neigh_position = match neighbor {
                 Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
@@ -144,9 +154,10 @@ fn step(
 
             // Cursor
             let delta = position - cursor_pos;
-            if delta.magnitude_squared() < 0.03.powi(2) {
-                accelerations[[y, x]] +=
-                    delta.try_normalize(0.001).unwrap_or(Vector2::x()) * 0.1 / *weight;
+            let magnitude = delta.magnitude();
+            if magnitude > 0.0001 {
+                accelerations[[y, x]] += (delta / magnitude)
+                    * (smoothstep(magnitude, 0.01, 0.0).powi(1) * 0.5 / *weight);
             }
 
             // Drag
@@ -224,7 +235,7 @@ fn draw(_app: &App, model: &Model, draw: &Draw) {
         }
         .cast();
         draw.ellipse()
-            .radius(0.001)
+            .radius(0.0005)
             .resolution(8.0)
             .x(position.x)
             .y(position.y);
