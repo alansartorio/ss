@@ -15,7 +15,7 @@ cgmath = { version = "0.18.0", features = ["rand"] }
 chumsky = "=1.0.0-alpha.2"
 clap = { version = "4.1.8", features = ["derive"] }
 itertools = "0.10.5"
-nannou = { git = "https://github.com/alansartorio/nannou.git", branch = "model-closure" }
+nannou = { git = "https://github.com/alansartorio/nannou.git" }
 ndarray = { version = "0.15.6", features = ["rayon"] }
 rand = "0.8.5"
 glam = "0.23.0"

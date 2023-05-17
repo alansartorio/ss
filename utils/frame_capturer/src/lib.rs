@@ -55,6 +55,7 @@ impl FrameCapturer {
         // Create the texture reshaper.
         let texture_view = texture.view().build();
         let texture_sample_type = texture.sample_type();
+        let texture_sample_type = wgpu::TextureSampleType::Float { filterable: false };
         let dst_format = nannou::Frame::TEXTURE_FORMAT;
         let texture_reshaper = wgpu::TextureReshaper::new(
             device,
@@ -116,14 +117,12 @@ impl FrameCapturer {
                 let path = directory
                     .join(format!("{:05}", self.frame_count))
                     .with_extension("png");
-                snapshot
-                    .read(move |result| {
-                        let image = result.expect("failed to map texture memory").to_owned();
-                        image
-                            .save(&path)
-                            .expect("failed to save texture to png image");
-                    })
-                    .unwrap();
+                snapshot.read(move |result| {
+                    let image = result.expect("failed to map texture memory").to_owned();
+                    image
+                        .save(&path)
+                        .expect("failed to save texture to png image");
+                });
             }
         }
         self.frame_count += 1;
