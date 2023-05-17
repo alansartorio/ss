@@ -89,6 +89,7 @@ fn step(
     vertical_edges: &mut Array2<bool>,
     cursor_pos: Vector2,
     dt: f64,
+    time: f64,
 ) {
     for node in mesh_nodes.iter_mut() {
         if let Node::Moving(MovingNode {
@@ -149,8 +150,9 @@ fn step(
             weight, velocity, ..
         }) = node
         {
-            //// Wind
-            //accelerations[[y, x]] += Vector2::x() * 0.01 / *weight;
+            // Wind
+            //accelerations[[y, x]] +=
+                //Vector2::x() * 0.002 * (0.5 + (1.0 + (time * 10.0).sin()) * 0.2) / *weight;
 
             // Cursor
             let delta = position - cursor_pos;
@@ -222,6 +224,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
             &mut model.vertical_edges,
             cursor_pos,
             dt,
+            update.since_start.as_secs_f64(),
         );
     }
 }
