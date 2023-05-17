@@ -316,7 +316,10 @@ fn draw(app: &App, model: &Model, draw: &Draw) {
         }
     }
     let mouse = Point2::from_homogeneous(
-        model.window_transform * Point2::new(app.mouse.x, app.mouse.y).cast().to_homogeneous(),
+        model.window_transform
+            * Point2::new(app.mouse.x, app.mouse.y)
+                .cast()
+                .to_homogeneous(),
     )
     .unwrap()
     .coords;
