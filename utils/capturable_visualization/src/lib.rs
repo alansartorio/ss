@@ -6,6 +6,7 @@ use frame_capturer::{CaptureMode, FrameCapturer};
 use nannou::{prelude::*, wgpu::ToTextureView};
 
 pub type ModelFn<Model> = dyn FnOnce(&App) -> Model;
+pub type EventFn<Model> = fn(&App, &mut Model, WindowEvent);
 pub type UpdateFn<Model> = fn(&App, &mut Model, Update);
 pub type DrawFn<Model> = fn(&App, &Model, &Draw);
 pub type ExitFn<Model> = fn(&App, Model);
@@ -39,6 +40,7 @@ pub struct VisualizationBuilder<M = ()> {
 #[derive(Clone, Copy)]
 struct VisualizationEvents<M = ()> {
     update: Option<UpdateFn<M>>,
+    event: Option<EventFn<M>>,
     exit: Option<ExitFn<M>>,
     draw: Option<DrawFn<M>>,
 }
@@ -51,6 +53,7 @@ impl<M: 'static> VisualizationBuilder<M> {
                 update: None,
                 draw: None,
                 exit: None,
+                event: None,
             },
             capture_data: None,
             aspect_ratio: 1.0,
@@ -105,6 +108,11 @@ impl<M: 'static> VisualizationBuilder<M> {
         self
     }
 
+    pub fn event(mut self, event: EventFn<M>) -> Self {
+        self.events.event = Some(event);
+        self
+    }
+
     pub fn draw(mut self, draw: DrawFn<M>) -> Self {
         self.events.draw = Some(draw);
         self
@@ -130,11 +138,19 @@ impl<M: 'static> VisualizationBuilder<M> {
     }
 
     pub fn run(self) {
-        nannou::app(|app| self.create_model(app))
-            .update(update)
-            .exit(exit)
-            .simple_window(view)
-            .run();
+        nannou::app(|app| {
+            app.new_window().view(view::<M>).event(event::<M>).build().unwrap();
+            self.create_model(app)
+        })
+        .update(update)
+        .exit(exit)
+        .run();
+    }
+}
+
+fn event<M>(app: &App, model: &mut Model<M>, window_event: WindowEvent) {
+    if let Some(event) = model.events.event {
+        event(app, &mut model.user_model, window_event);
     }
 }
 
