@@ -39,6 +39,14 @@ enum Node {
     Fixed { position: Vector2 },
 }
 
+impl Node {
+    fn position(&self) -> &Vector2 {
+        match self {
+            Self::Moving(MovingNode { position, .. }) | Self::Fixed { position } => position,
+        }
+    }
+}
+
 fn main() {
     VisualizationBuilder::new(model)
         .update(update)
@@ -120,53 +128,43 @@ fn step(
         }
     });
     let mut accelerations = Array2::<Vector2>::zeros(mesh_nodes.dim());
-    let mut accelerations_right_neighbor = Array2::<Vector2>::zeros(horizontal_edges.dim());
-    let mut accelerations_up_neighbor = Array2::<Vector2>::zeros(vertical_edges.dim());
+    let mut accelerations_neighbors = accelerations.clone();
     //mesh_nodes.indexed_iter().par_bridge().for_each(|((y, x), node)| {
 
-    let calculate_acceleration = |node: &Node,
-                                  neighbor: &Node,
-                                  acceleration: &mut Vector2,
-                                  neighbor_acceleration: &mut Vector2,
-                                  edge: &mut bool| {
-        let position = match node {
-            Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
-        };
-        let neigh_position = match neighbor {
-            Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
-        };
-        if let Some(force) = link_force(*position, *neigh_position) {
-            if let Node::Moving(MovingNode { weight, .. }) = node {
-                *acceleration += force / *weight;
+    let calculate_apply_acceleration = |node: &Node,
+                                        neighbor: &Node,
+                                        acceleration: &mut Vector2,
+                                        neighbor_acceleration: &mut Vector2,
+                                        edge: &mut bool| {
+        if *edge {
+            if let Some(force) = link_force(*node.position(), *neighbor.position()) {
+                if let Node::Moving(MovingNode { weight, .. }) = node {
+                    *acceleration += force / *weight;
+                }
+                if let Node::Moving(MovingNode { weight, .. }) = neighbor {
+                    *neighbor_acceleration -= force / *weight;
+                }
+            } else {
+                *edge = false;
             }
-            if let Node::Moving(MovingNode { weight, .. }) = neighbor {
-                *neighbor_acceleration -= force / *weight;
-            }
-        } else {
-            *edge = false;
         }
     };
 
     Zip::from(mesh_nodes.slice_axis(Axis(1), (..-1).into()))
         .and(mesh_nodes.slice_axis(Axis(1), (1..).into()))
         .and(&mut accelerations.slice_axis_mut(Axis(1), (..-1).into()))
-        .and(&mut accelerations_right_neighbor)
+        .and(&mut accelerations_neighbors.slice_axis_mut(Axis(1), (1..).into()))
         .and(horizontal_edges.view_mut())
-        .par_for_each(calculate_acceleration);
+        .par_for_each(calculate_apply_acceleration);
 
     Zip::from(mesh_nodes.slice_axis(Axis(0), (..-1).into()))
         .and(mesh_nodes.slice_axis(Axis(0), (1..).into()))
         .and(&mut accelerations.slice_axis_mut(Axis(0), (..-1).into()))
-        .and(&mut accelerations_up_neighbor)
+        .and(&mut accelerations_neighbors.slice_axis_mut(Axis(0), (1..).into()))
         .and(vertical_edges.view_mut())
-        .par_for_each(calculate_acceleration);
+        .par_for_each(calculate_apply_acceleration);
 
-    accelerations
-        .slice_axis_mut(Axis(0), (1..).into())
-        .add_assign(&accelerations_up_neighbor);
-    accelerations
-        .slice_axis_mut(Axis(1), (1..).into())
-        .add_assign(&accelerations_right_neighbor);
+    accelerations += &accelerations_neighbors;
 
     // Apply simple accelerations
     //par_azip!((acceleration in &mut accelerations, node in mesh_nodes), {
@@ -229,7 +227,7 @@ fn step(
 }
 
 fn update(app: &App, model: &mut Model, update: Update) {
-    const STEPS: usize = 100;
+    const STEPS: usize = 1000;
     let dt = update.since_last.as_secs_f64() / STEPS as f64;
     let cursor_pos = Vector2::new(app.mouse.x as f64, app.mouse.y as f64);
 
@@ -288,14 +286,8 @@ fn draw(_app: &App, model: &Model, draw: &Draw) {
         // Link forces
         for [ny, nx] in [right, up].into_iter().flatten() {
             let node2 = &model.mesh_nodes[[ny, nx]];
-            let position1 = match node1 {
-                Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
-            }
-            .cast();
-            let position2 = match node2 {
-                Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
-            }
-            .cast();
+            let position1 = node1.position().cast();
+            let position2 = node2.position().cast();
 
             draw.line()
                 .start(pt2(position1.x, position1.y))
