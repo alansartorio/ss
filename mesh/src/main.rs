@@ -1,5 +1,3 @@
-use std::ops::AddAssign;
-
 use capturable_visualization::VisualizationBuilder;
 use gear_predictor_corrector::{GearCorrector, GearPredictor};
 use nalgebra::{Matrix3, Point2, Scale2, Translation2};
@@ -8,7 +6,7 @@ use nannou::{color, prelude::*, App, Draw};
 use ndarray::parallel::prelude::*;
 use ndarray::{Array2, Axis, Zip};
 
-const K: f64 = 1e4;
+const K: f64 = 1e3;
 
 type Vector2 = nalgebra::Vector2<f64>;
 
@@ -100,7 +98,7 @@ fn initial_model() -> Model {
         } else {
             Node::Moving(MovingNode {
                 position,
-                weight: 0.005,
+                weight: 0.0005,
                 ..Default::default()
             })
         }
@@ -224,7 +222,7 @@ fn step(
                 }
 
                 // Drag
-                *acceleration += -*velocity * 0.03 / *weight;
+                *acceleration += -*velocity * 0.003 / *weight;
             }
         });
     Zip::from(mesh_nodes)
