@@ -4,16 +4,18 @@ use itertools::Itertools;
 use nannou::{color, prelude::*, App, Draw};
 use ndarray::{s, Array2, Axis};
 
-const K: f64 = 10e4;
+const K: f64 = 10e3;
 
 type Vector2 = nalgebra::Vector2<f64>;
 
-fn link_force(position1: Vector2, position2: Vector2) -> f64 {
-    let dist = (position1 - position2).magnitude() - 0.01;
-    if dist > 0.0 {
-        K * dist
+fn link_force(position1: Vector2, position2: Vector2) -> Vector2 {
+    let delta = position2 - position1;
+    let dist = delta.magnitude();
+    let expansion = dist - 0.01;
+    if expansion > 0.0 {
+        K * expansion * delta / dist
     } else {
-        0.0
+        Vector2::zeros()
     }
 }
 
@@ -46,7 +48,7 @@ struct Model {
 
 fn model(app: &App) -> Model {
     let mesh_nodes = Array2::<Node>::from_shape_fn((11, 11), |(y, x)| {
-        let position = Vector2::new(x as f64, y as f64 + 3.5);
+        let position = Vector2::new(x as f64, y as f64) / 10.0 * 0.1 + Vector2::new(0.0, 0.1);
         if y == 10 {
             Node::Fixed { position }
         } else {
@@ -61,76 +63,110 @@ fn model(app: &App) -> Model {
     Model { mesh_nodes }
 }
 
-fn update(_app: &App, model: &mut Model, update: Update) {
-    let dt = update.since_last.as_secs_f64();
-    for node in model.mesh_nodes.iter_mut() {
-        match node {
-            Node::Moving(MovingNode {
-                position,
-                velocity,
-                higher_order,
-                ..
-            }) => {
-                let predictions = GearPredictor {
-                    rs: [
-                        *position,
-                        *velocity,
-                        higher_order[0],
-                        higher_order[1],
-                        higher_order[2],
-                        higher_order[3],
-                    ],
-                }
-                .predict(dt)
-                .predictions;
-                *position = predictions[0];
-                *velocity = predictions[1];
-                higher_order.copy_from_slice(&predictions[2..]);
+fn step(mesh_nodes: &mut Array2<Node>, dt: f64) {
+    for node in mesh_nodes.iter_mut() {
+        if let Node::Moving(MovingNode {
+            position,
+            velocity,
+            higher_order,
+            ..
+        }) = node
+        {
+            let predictions = GearPredictor {
+                rs: [
+                    *position,
+                    *velocity,
+                    higher_order[0],
+                    higher_order[1],
+                    higher_order[2],
+                    higher_order[3],
+                ],
             }
-            Node::Fixed { .. } => (),
+            .predict(dt)
+            .predictions;
+            *position = predictions[0];
+            *velocity = predictions[1];
+            higher_order.copy_from_slice(&predictions[2..]);
+        }
+    }
+    let mut accelerations = Array2::<Vector2>::zeros(mesh_nodes.dim());
+    for ((y, x), node) in mesh_nodes.indexed_iter() {
+        let position = match node {
+            Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
         };
-    }
-    let mut accelerations = Array2::<Vector2>::zeros(model.mesh_nodes.dim());
-    for ((y, x), node) in model.mesh_nodes.indexed_iter() {
-        accelerations[[y, x]] += Vector2::new(0.0, -GRAVITY);
-    }
-    model
-        .mesh_nodes
-        .zip_mut_with(&accelerations, |mut node, acceleration| {
-            if let Node::Moving(MovingNode {
-                position,
-                velocity,
-                higher_order,
-                ..
-            }) = &mut node
-            {
-                let corrected = GearCorrector {
-                    predictions: [
-                        *position,
-                        *velocity,
-                        higher_order[0],
-                        higher_order[1],
-                        higher_order[2],
-                        higher_order[3],
-                    ],
+
+        for [ny, nx] in [[0, 1], [1, 0]] {
+            let nx = x + nx;
+            let ny = y + ny;
+            if nx < mesh_nodes.dim().1 && ny < mesh_nodes.dim().0 {
+                let neighbor = &mesh_nodes[[ny, nx]];
+                let neigh_position = match neighbor {
+                    Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => {
+                        position
+                    }
+                };
+                let force = link_force(*position, *neigh_position);
+
+                if let Node::Moving(MovingNode { weight, .. }) = node {
+                    accelerations[[y, x]] += force / *weight;
                 }
-                .correct(*acceleration, dt);
-                *position = corrected[0];
-                *velocity = corrected[1];
-                higher_order.copy_from_slice(&corrected[2..]);
+                if let Node::Moving(MovingNode { weight, .. }) = neighbor {
+                    accelerations[[ny, nx]] -= force / *weight;
+                }
             }
-        });
+        }
+        accelerations[[y, x]] += Vector2::new(0.0, -GRAVITY);
+        if let Node::Moving(MovingNode { weight, .. }) = node {
+            accelerations[[y, x]] += Vector2::new(0.01, 0.0) / *weight;
+        }
+    }
+    mesh_nodes.zip_mut_with(&accelerations, |mut node, acceleration| {
+        if let Node::Moving(MovingNode {
+            position,
+            velocity,
+            higher_order,
+            ..
+        }) = &mut node
+        {
+            let corrected = GearCorrector {
+                predictions: [
+                    *position,
+                    *velocity,
+                    higher_order[0],
+                    higher_order[1],
+                    higher_order[2],
+                    higher_order[3],
+                ],
+            }
+            .correct(*acceleration, dt);
+            *position = corrected[0];
+            *velocity = corrected[1];
+            higher_order.copy_from_slice(&corrected[2..]);
+        }
+    });
+}
+
+fn update(_app: &App, model: &mut Model, update: Update) {
+    const STEPS: usize = 1000;
+    let dt = update.since_last.as_secs_f64() / STEPS as f64;
+    for _ in 0..100 {
+        step(&mut model.mesh_nodes, dt);
+    }
 }
 
 fn draw(_app: &App, model: &Model, draw: &Draw) {
     draw.background().color(BLACK);
-    let draw = draw.x(0.5).scale(1.0 / 14.0).x(-5.0);
+    let draw = draw.x(0.5).scale(5.0).x(-0.05);
     for node in &model.mesh_nodes {
         let position = match node {
             Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
         }
         .cast();
-        draw.ellipse().radius(0.05).x(position.x).y(position.y);
+        draw.ellipse()
+            .radius(0.001)
+            .resolution(8.0)
+            .x(position.x)
+            .y(position.y);
     }
 
     for row in model
@@ -151,7 +187,7 @@ fn draw(_app: &App, model: &Model, draw: &Draw) {
             draw.line()
                 .start(pt2(position1.x, position1.y))
                 .end(pt2(position2.x, position2.y))
-                .stroke_weight(0.02)
+                .stroke_weight(0.0002)
                 .color(color::WHITE);
         }
     }
