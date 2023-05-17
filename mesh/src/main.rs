@@ -95,6 +95,7 @@ fn step(mesh_nodes: &mut Array2<Node>, dt: f64) {
             Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
         };
 
+        // Link forces
         for [ny, nx] in [[0, 1], [1, 0]] {
             let nx = x + nx;
             let ny = y + ny;
@@ -115,7 +116,11 @@ fn step(mesh_nodes: &mut Array2<Node>, dt: f64) {
                 }
             }
         }
+
+        // Gravity
         accelerations[[y, x]] += Vector2::new(0.0, -GRAVITY);
+
+        // Wind
         if let Node::Moving(MovingNode { weight, .. }) = node {
             accelerations[[y, x]] += Vector2::new(0.01, 0.0) / *weight;
         }
