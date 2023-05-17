@@ -1347,6 +1347,7 @@ dependencies = [
  "nalgebra",
  "nannou",
  "ndarray",
+ "rayon",
 ]
 
 [[package]]
@@ -1516,6 +1517,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "rawpointer",
+ "rayon",
 ]
 
 [[package]]
