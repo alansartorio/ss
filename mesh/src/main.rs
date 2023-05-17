@@ -4,7 +4,7 @@ use nalgebra::{Matrix3, Point2, Scale2, Translation2};
 use nannou::{color, prelude::*, App, Draw};
 use ndarray::Array2;
 
-const K: f64 = 1e3;
+const K: f64 = 1e4;
 
 type Vector2 = nalgebra::Vector2<f64>;
 
@@ -64,7 +64,7 @@ fn initial_model() -> Model {
         } else {
             Node::Moving(MovingNode {
                 position,
-                weight: 0.01,
+                weight: 0.005,
                 ..Default::default()
             })
         }
@@ -157,7 +157,7 @@ fn step(
             let magnitude = delta.magnitude();
             if magnitude > 0.0001 {
                 accelerations[[y, x]] += (delta / magnitude)
-                    * (smoothstep(magnitude, 0.01, 0.0).powi(1) * 0.5 / *weight);
+                    * (smoothstep(magnitude, 0.03, 0.0).powi(3) * 0.3 / *weight);
             }
 
             // Drag
