@@ -11,14 +11,15 @@ const K: f64 = 1e3;
 
 type Vector2 = nalgebra::Vector2<f64>;
 
-fn link_force(position1: Vector2, position2: Vector2) -> Vector2 {
+fn link_force(position1: Vector2, position2: Vector2) -> Option<Vector2> {
     let delta = position2 - position1;
     let dist = delta.magnitude();
     let expansion = dist - 0.01;
     if expansion > 0.0 {
-        K * expansion * (delta / dist)
+        let force = K * expansion;
+        (force < 1.0).then(|| force * (delta / dist))
     } else {
-        Vector2::zeros()
+        Some(Vector2::zeros())
     }
 }
 
@@ -47,6 +48,8 @@ fn main() {
 
 struct Model {
     mesh_nodes: Array2<Node>,
+    horizontal_edges: Array2<bool>,
+    vertical_edges: Array2<bool>,
 }
 
 fn model(_app: &App) -> Model {
@@ -63,10 +66,20 @@ fn model(_app: &App) -> Model {
         }
     });
 
-    Model { mesh_nodes }
+    Model {
+        mesh_nodes,
+        horizontal_edges: Array2::from_shape_fn((11, 10), |_| true),
+        vertical_edges: Array2::from_shape_fn((10, 11), |_| true),
+    }
 }
 
-fn step(mesh_nodes: &mut Array2<Node>, cursor_pos: Vector2, dt: f64) {
+fn step(
+    mesh_nodes: &mut Array2<Node>,
+    horizontal_edges: &mut Array2<bool>,
+    vertical_edges: &mut Array2<bool>,
+    cursor_pos: Vector2,
+    dt: f64,
+) {
     for node in mesh_nodes.iter_mut() {
         if let Node::Moving(MovingNode {
             position,
@@ -98,32 +111,34 @@ fn step(mesh_nodes: &mut Array2<Node>, cursor_pos: Vector2, dt: f64) {
             Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
         };
 
+        let right =
+            (x + 1 < mesh_nodes.dim().1).then(|| (&mut horizontal_edges[[y, x]], [y, x + 1]));
+        let up = (y + 1 < mesh_nodes.dim().0).then(|| (&mut vertical_edges[[y, x]], [y + 1, x]));
         // Link forces
-        for [ny, nx] in [[0, 1], [1, 0]] {
-            let nx = x + nx;
-            let ny = y + ny;
-            if nx < mesh_nodes.dim().1 && ny < mesh_nodes.dim().0 {
-                let neighbor = &mesh_nodes[[ny, nx]];
-                let neigh_position = match neighbor {
-                    Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => {
-                        position
-                    }
-                };
-                let force = link_force(*position, *neigh_position);
-
+        for (edge, [ny, nx]) in [right, up].into_iter().flatten() {
+            let neighbor = &mesh_nodes[[ny, nx]];
+            let neigh_position = match neighbor {
+                Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
+            };
+            if let Some(force) = link_force(*position, *neigh_position) {
                 if let Node::Moving(MovingNode { weight, .. }) = node {
                     accelerations[[y, x]] += force / *weight;
                 }
                 if let Node::Moving(MovingNode { weight, .. }) = neighbor {
                     accelerations[[ny, nx]] -= force / *weight;
                 }
+            } else {
+                *edge = false;
             }
         }
 
         // Gravity
         accelerations[[y, x]] += Vector2::y() * -GRAVITY;
 
-        if let Node::Moving(MovingNode { weight, velocity, .. }) = node {
+        if let Node::Moving(MovingNode {
+            weight, velocity, ..
+        }) = node
+        {
             //// Wind
             //accelerations[[y, x]] += Vector2::x() * 0.01 / *weight;
 
@@ -190,7 +205,13 @@ fn update(app: &App, model: &mut Model, update: Update) {
             .unwrap()
             .coords;
     for _ in 0..STEPS {
-        step(&mut model.mesh_nodes, cursor_pos, dt);
+        step(
+            &mut model.mesh_nodes,
+            &mut model.horizontal_edges,
+            &mut model.vertical_edges,
+            cursor_pos,
+            dt,
+        );
     }
 }
 
@@ -209,12 +230,14 @@ fn draw(_app: &App, model: &Model, draw: &Draw) {
             .y(position.y);
     }
 
-    for row in model
-        .mesh_nodes
-        .axis_iter(Axis(0))
-        .chain(model.mesh_nodes.axis_iter(Axis(1)))
-    {
-        for (node1, node2) in row.iter().tuple_windows() {
+    for ((y, x), node1) in model.mesh_nodes.indexed_iter() {
+        let right = (x + 1 < model.mesh_nodes.dim().1 && model.horizontal_edges[[y, x]])
+            .then_some([y, x + 1]);
+        let up = (y + 1 < model.mesh_nodes.dim().0 && model.vertical_edges[[y, x]])
+            .then_some([y + 1, x]);
+        // Link forces
+        for [ny, nx] in [right, up].into_iter().flatten() {
+            let node2 = &model.mesh_nodes[[ny, nx]];
             let position1 = match node1 {
                 Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
             }
