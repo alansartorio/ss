@@ -3,17 +3,50 @@ use bevy::prelude::*;
 use bevy::sprite::MaterialMesh2dBundle;
 
 #[derive(Component)]
-struct Node;
+enum Node {
+    Fixed,
+    Moving,
+}
 
 #[derive(Component)]
 struct Edge(Entity, Entity);
+
+fn generate_grid_mesh(
+    start: Vec2,
+    end: Vec2,
+    columns: usize,
+    rows: usize,
+) -> (Vec<Vec2>, Vec<(usize, usize)>) {
+    let diagonal = (end - start) / vec2((columns - 1) as f32, (rows - 1) as f32);
+    let mut nodes = vec![];
+    let mut edges = vec![];
+    for y in 0..rows {
+        let row_index = y * columns;
+        for x in 0..columns {
+            let position = start + vec2(diagonal.x * x as f32, diagonal.y * y as f32);
+            nodes.push(position);
+        }
+        for x in 1..columns {
+            edges.push((row_index + x - 1, row_index + x));
+        }
+    }
+    for y in 1..rows {
+        let row_index = y * columns;
+        for x in 0..columns {
+            edges.push((row_index + x - columns, row_index + x));
+        }
+    }
+    (nodes, edges)
+}
 
 fn add_nodes(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let mut add_node = |pos: Vec2| {
+let (nodes, edges) = generate_grid_mesh(vec2(-0.05, 0.1), vec2(0.05, 0.0), 10, 10);
+
+    let mut add_node = |pos: Vec2, node_type: Node| {
         commands
             .spawn((
                 MaterialMesh2dBundle {
@@ -25,21 +58,22 @@ fn add_nodes(
                     },
                     ..default()
                 },
-                Node,
+                node_type,
             ))
             .id()
     };
 
-    let node1 = add_node(vec2(0.00, 0.0));
-    let node2 = add_node(vec2(0.01, 0.0));
-    let node3 = add_node(vec2(0.01, 0.01));
+    let mut node_entities = vec![];
+    for node in nodes {
+        node_entities.push(add_node(node, Node::Moving));
+    }
 
     let mut add_edge = |start, end| {
         commands
             .spawn((
                 MaterialMesh2dBundle {
                     mesh: meshes
-                        .add(shape::Quad::new(vec2(1.0, 0.0005)).into())
+                        .add(shape::Quad::new(vec2(1.0, 0.001)).into())
                         .into(),
                     material: materials.add(ColorMaterial::from(Color::BLACK)),
                     transform: Transform {
@@ -53,8 +87,9 @@ fn add_nodes(
             .id()
     };
 
-    add_edge(node1, node2);
-    add_edge(node2, node3);
+    for (node1, node2) in edges {
+        add_edge(node_entities[node1], node_entities[node2]);
+    }
 }
 
 fn add_camera(mut commands: Commands) {
