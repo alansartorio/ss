@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use capturable_visualization::VisualizationBuilder;
 use gear_predictor_corrector::{GearCorrector, GearPredictor};
 use nalgebra::{Matrix3, Point2, Scale2, Translation2};
@@ -83,12 +85,13 @@ fn event(_app: &App, model: &mut Model, event: WindowEvent) {
             Key::R => {
                 model.mesh_model = initial_model(model.mesh_size);
             }
-            Key::Plus => {
-                model.mesh_size += 5;
-                model.mesh_model = initial_model(model.mesh_size);
-            }
-            Key::Minus => {
-                model.mesh_size = model.mesh_size.saturating_sub(5).max(2);
+            key @ (Key::Plus | Key::Minus) => {
+                model.mesh_size = match key {
+                    Key::Plus => model.mesh_size.saturating_add(5),
+                    Key::Minus => model.mesh_size.saturating_sub(5).max(2),
+                    _ => unreachable!(),
+                };
+                println!("mesh_size = {}", model.mesh_size);
                 model.mesh_model = initial_model(model.mesh_size);
             }
             _ => {}
@@ -102,6 +105,8 @@ struct Model {
     interaction_radius: f64,
     mesh_size: usize,
     mesh_model: MeshModel,
+    frame_counter: usize,
+    frame_times: VecDeque<f64>,
 }
 
 struct MeshModel {
@@ -110,6 +115,9 @@ struct MeshModel {
     vertical_edges: Array2<bool>,
 }
 
+const PRINT_FRAMES_EVERY: usize = 10;
+const FPS_MEAN_WINDOW: usize = 100;
+
 fn model(_app: &App) -> Model {
     let initial_mesh_size = 10;
     Model {
@@ -117,6 +125,8 @@ fn model(_app: &App) -> Model {
         window_transform: Matrix3::identity(),
         interaction_radius: 0.03,
         mesh_size: initial_mesh_size,
+        frame_counter: 0,
+        frame_times: VecDeque::with_capacity(FPS_MEAN_WINDOW),
     }
 }
 
@@ -286,12 +296,23 @@ fn step(
 }
 
 fn update(app: &App, model: &mut Model, update: Update) {
+    let dt = update.since_last.as_secs_f64();
+    model.frame_times.push_front(dt);
+    if model.frame_times.len() > FPS_MEAN_WINDOW {
+        model.frame_times.pop_back();
+    }
+    if model.frame_counter % PRINT_FRAMES_EVERY == PRINT_FRAMES_EVERY - 1 {
+        let fps = (model.frame_times.len() as f64 / model.frame_times.iter().sum::<f64>()) as usize;
+        println!("fps = {fps}");
+        model.frame_counter = 0;
+    } else {
+        model.frame_counter += 1;
+    }
     const STEPS: usize = 100;
-    let mut dt = update.since_last.as_secs_f64() / STEPS as f64;
+    let mut dt = dt / STEPS as f64;
     const MAX_DT: f64 = 0.0002;
     if dt > MAX_DT {
-        println!("slowing!");
-        //dbg!(dt);
+        //println!("slowing!");
         dt = MAX_DT;
     }
     let cursor_pos = matches!(app.mouse.buttons.left(), ButtonPosition::Down(..))
