@@ -76,7 +76,7 @@ enum Wall {
     Bottom,
 }
 
-const K: Float = 10e4 * 100.0;
+const K: Float = 10e4 * 1000.0;
 
 fn did_ball_go_outside(ball: &Ball, config: &InputData) -> Vec<Wall> {
     let mut collisions = Vec::with_capacity(2);
@@ -241,12 +241,13 @@ fn run<W: Write, F: FnMut(&BTreeMap<ID, (Ball, [Vector2<f64>; 4])>, Float) -> bo
         {
             let neighs = neighbors.get_neighbors(id);
 
-            for other in neighs.map(|id| get_predicted_ball(&predictions[id], &state[id].0)) {
-                if id > other.id {
-                    let force = calculate_force(&ball, &other, radius_sum);
-                    *forces.get_mut(&ball.id).unwrap() += force;
-                    *forces.get_mut(&other.id).unwrap() -= force;
-                }
+            for other in neighs
+                .filter(|other_id| id > **other_id)
+                .map(|id| get_predicted_ball(&predictions[id], &state[id].0))
+            {
+                let force = calculate_force(&ball, &other, radius_sum);
+                *forces.get_mut(&ball.id).unwrap() += force;
+                *forces.get_mut(&other.id).unwrap() -= force;
             }
 
             let walls = did_ball_go_outside(&ball, &config);
