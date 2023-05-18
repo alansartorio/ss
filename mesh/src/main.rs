@@ -2,6 +2,7 @@ use capturable_visualization::VisualizationBuilder;
 use gear_predictor_corrector::{GearCorrector, GearPredictor};
 use nalgebra::{Matrix3, Point2, Scale2, Translation2};
 use nannou::state::mouse::ButtonPosition;
+use nannou::winit::dpi::PhysicalPosition;
 use nannou::{color, prelude::*, App, Draw};
 use ndarray::parallel::prelude::*;
 use ndarray::{Array2, Axis, Zip};
@@ -22,7 +23,6 @@ fn link_force(position1: Vector2, position2: Vector2) -> Option<Vector2> {
     }
 }
 
-const INTERACTION_RADIUS: f64 = 0.03;
 const GRAVITY: f64 = 9.8e-1;
 
 #[derive(Debug, Default)]
@@ -72,6 +72,13 @@ fn event(_app: &App, model: &mut Model, event: WindowEvent) {
                     * nalgebra::convert::<_, Matrix3<f64>>(Scale2::new(scale, scale))
             }
         }
+        MouseWheel(scroll_delta, _) => {
+            let scroll = match scroll_delta {
+                MouseScrollDelta::LineDelta(_, y) => y as f64,
+                MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => y,
+            };
+            model.interaction_radius *= 1.1.pow(scroll / 100.0);
+        }
         _ => {}
     }
 }
@@ -81,6 +88,7 @@ struct Model {
     horizontal_edges: Array2<bool>,
     vertical_edges: Array2<bool>,
     window_transform: Matrix3<f64>,
+    interaction_radius: f64,
 }
 
 const MESH_SIZE: usize = 30;
@@ -109,6 +117,7 @@ fn initial_model() -> Model {
         horizontal_edges: Array2::from_shape_fn((MESH_SIZE, MESH_SIZE - 1), |_| true),
         vertical_edges: Array2::from_shape_fn((MESH_SIZE - 1, MESH_SIZE), |_| true),
         window_transform: Matrix3::identity(),
+        interaction_radius: 0.03,
     }
 }
 
@@ -123,6 +132,7 @@ fn step(
     horizontal_edges: &mut Array2<bool>,
     vertical_edges: &mut Array2<bool>,
     cursor_pos: Option<Vector2>,
+    interaction_radius: f64,
     dt: f64,
     time: f64,
 ) {
@@ -216,7 +226,7 @@ fn step(
                     let magnitude = delta.magnitude();
                     if magnitude > 0.0001 {
                         *acceleration += (delta / magnitude)
-                            * (smoothstep(magnitude, INTERACTION_RADIUS, 0.0).powi(10) * 0.2
+                            * (smoothstep(magnitude, interaction_radius, 0.0).powi(4) * 0.2
                                 / *weight);
                     }
                 }
@@ -276,6 +286,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
             &mut model.horizontal_edges,
             &mut model.vertical_edges,
             cursor_pos,
+            model.interaction_radius,
             dt,
             update.since_start.as_secs_f64(),
         );
@@ -324,7 +335,7 @@ fn draw(app: &App, model: &Model, draw: &Draw) {
     .unwrap()
     .coords;
     draw.ellipse()
-        .radius(INTERACTION_RADIUS as f32)
+        .radius(model.interaction_radius as f32)
         .resolution(20.0)
         .x(mouse.x as f32)
         .y(mouse.y as f32)
