@@ -7,6 +7,7 @@ members = [
     "TP4A/tp4a",
     "TP4B/tp4b",
     "mesh",
+    "mesh_bevy",
     "utils/*",
 ]
 [workspace.dependencies]
@@ -21,6 +22,7 @@ rand = "0.8.5"
 glam = "0.23.0"
 nalgebra = "0.32.2"
 rayon = "1.7.0"
+bevy = { git = "https://github.com/bevyengine/bevy.git" }
 
 cim = { path = "utils/cim" }
 frame_capturer = { path = "utils/frame_capturer" }
