@@ -11,10 +11,10 @@ const K: f64 = 1e3;
 
 type Vector2 = nalgebra::Vector2<f64>;
 
-fn link_force(position1: Vector2, position2: Vector2) -> Option<Vector2> {
+fn link_force(position1: Vector2, position2: Vector2, natural_length: f64) -> Option<Vector2> {
     let delta = position2 - position1;
     let dist = delta.magnitude();
-    let expansion = dist - 0.1 / (MESH_SIZE - 1) as f64;
+    let expansion = dist - natural_length;
     if expansion > 0.0 {
         let force = K * expansion;
         (force < 0.3).then(|| force * (delta / dist))
@@ -79,29 +79,52 @@ fn event(_app: &App, model: &mut Model, event: WindowEvent) {
             };
             model.interaction_radius *= 1.1.pow(scroll / 100.0);
         }
+        KeyPressed(key) => match key {
+            Key::R => {
+                model.mesh_model = initial_model(model.mesh_size);
+            }
+            Key::Plus => {
+                model.mesh_size += 5;
+                model.mesh_model = initial_model(model.mesh_size);
+            }
+            Key::Minus => {
+                model.mesh_size = model.mesh_size.saturating_sub(5).max(2);
+                model.mesh_model = initial_model(model.mesh_size);
+            }
+            _ => {}
+        },
         _ => {}
     }
 }
 
 struct Model {
+    window_transform: Matrix3<f64>,
+    interaction_radius: f64,
+    mesh_size: usize,
+    mesh_model: MeshModel,
+}
+
+struct MeshModel {
     mesh_nodes: Array2<Node>,
     horizontal_edges: Array2<bool>,
     vertical_edges: Array2<bool>,
-    window_transform: Matrix3<f64>,
-    interaction_radius: f64,
 }
-
-const MESH_SIZE: usize = 30;
 
 fn model(_app: &App) -> Model {
-    initial_model()
+    let initial_mesh_size = 10;
+    Model {
+        mesh_model: initial_model(initial_mesh_size),
+        window_transform: Matrix3::identity(),
+        interaction_radius: 0.03,
+        mesh_size: initial_mesh_size,
+    }
 }
 
-fn initial_model() -> Model {
-    let mesh_nodes = Array2::<Node>::from_shape_fn((MESH_SIZE, MESH_SIZE), |(y, x)| {
-        let position = Vector2::new(x as f64, y as f64) / (MESH_SIZE - 1) as f64 * 0.1
+fn initial_model(mesh_size: usize) -> MeshModel {
+    let mesh_nodes = Array2::<Node>::from_shape_fn((mesh_size, mesh_size), |(y, x)| {
+        let position = Vector2::new(x as f64, y as f64) / (mesh_size - 1) as f64 * 0.1
             + Vector2::new(0.0, 0.1);
-        if y == MESH_SIZE - 1 {
+        if y == mesh_size - 1 {
             Node::Fixed { position }
         } else {
             Node::Moving(MovingNode {
@@ -111,13 +134,10 @@ fn initial_model() -> Model {
             })
         }
     });
-
-    Model {
+    MeshModel {
         mesh_nodes,
-        horizontal_edges: Array2::from_shape_fn((MESH_SIZE, MESH_SIZE - 1), |_| true),
-        vertical_edges: Array2::from_shape_fn((MESH_SIZE - 1, MESH_SIZE), |_| true),
-        window_transform: Matrix3::identity(),
-        interaction_radius: 0.03,
+        horizontal_edges: Array2::from_shape_fn((mesh_size, mesh_size - 1), |_| true),
+        vertical_edges: Array2::from_shape_fn((mesh_size - 1, mesh_size), |_| true),
     }
 }
 
@@ -133,6 +153,7 @@ fn step(
     vertical_edges: &mut Array2<bool>,
     cursor_pos: Option<Vector2>,
     interaction_radius: f64,
+    natural_length: f64,
     dt: f64,
     time: f64,
 ) {
@@ -171,7 +192,8 @@ fn step(
                                         neighbor_acceleration: &mut Vector2,
                                         edge: &mut bool| {
         if *edge {
-            if let Some(force) = link_force(*node.position(), *neighbor.position()) {
+            if let Some(force) = link_force(*node.position(), *neighbor.position(), natural_length)
+            {
                 if let Node::Moving(MovingNode { weight, .. }) = node {
                     *acceleration += force / *weight;
                 }
@@ -282,11 +304,12 @@ fn update(app: &App, model: &mut Model, update: Update) {
 
     for _ in 0..STEPS {
         step(
-            &mut model.mesh_nodes,
-            &mut model.horizontal_edges,
-            &mut model.vertical_edges,
+            &mut model.mesh_model.mesh_nodes,
+            &mut model.mesh_model.horizontal_edges,
+            &mut model.mesh_model.vertical_edges,
             cursor_pos,
             model.interaction_radius,
+            0.1 / (model.mesh_size - 1) as f64,
             dt,
             update.since_start.as_secs_f64(),
         );
@@ -296,7 +319,7 @@ fn update(app: &App, model: &mut Model, update: Update) {
 fn draw(app: &App, model: &Model, draw: &Draw) {
     draw.background().color(BLACK);
     let draw = draw.x(0.5).scale(5.0).x(-0.05);
-    for node in &model.mesh_nodes {
+    for node in &model.mesh_model.mesh_nodes {
         let position = match node {
             Node::Moving(MovingNode { position, .. }) | Node::Fixed { position } => position,
         }
@@ -308,14 +331,16 @@ fn draw(app: &App, model: &Model, draw: &Draw) {
             .y(position.y);
     }
 
-    for ((y, x), node1) in model.mesh_nodes.indexed_iter() {
-        let right = (x + 1 < model.mesh_nodes.dim().1 && model.horizontal_edges[[y, x]])
-            .then_some([y, x + 1]);
-        let up = (y + 1 < model.mesh_nodes.dim().0 && model.vertical_edges[[y, x]])
-            .then_some([y + 1, x]);
+    for ((y, x), node1) in model.mesh_model.mesh_nodes.indexed_iter() {
+        let right = (x + 1 < model.mesh_model.mesh_nodes.dim().1
+            && model.mesh_model.horizontal_edges[[y, x]])
+        .then_some([y, x + 1]);
+        let up = (y + 1 < model.mesh_model.mesh_nodes.dim().0
+            && model.mesh_model.vertical_edges[[y, x]])
+        .then_some([y + 1, x]);
         // Link forces
         for [ny, nx] in [right, up].into_iter().flatten() {
-            let node2 = &model.mesh_nodes[[ny, nx]];
+            let node2 = &model.mesh_model.mesh_nodes[[ny, nx]];
             let position1 = node1.position().cast();
             let position2 = node2.position().cast();
 
