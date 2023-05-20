@@ -1,7 +1,9 @@
 use bevy::math::{vec2, vec3, Vec3Swizzles};
 use bevy::prelude::*;
 use bevy::sprite::MaterialMesh2dBundle;
-use gear_predictor_corrector::GearPredictor;
+use bevy::utils::HashMap;
+use gear_predictor_corrector::{GearCorrector, GearPredictor};
+use ndarray::Array2;
 
 #[derive(Component, PartialEq, Eq)]
 enum Node {
@@ -107,20 +109,42 @@ fn add_camera(mut commands: Commands) {
     });
 }
 
-fn update_nodes(time: Res<Time>, mut nodes: Query<(&Node, &mut Integration, &mut Transform)>) {
+fn update_nodes(
+    time: Res<Time>,
+    mut nodes: Query<(Entity, &Node, &mut Integration, &mut Transform)>,
+    mut edges: Query<&Edge>,
+) {
     const STEPS: usize = 100;
     let dt = time.delta_seconds().max(1e-6) / STEPS as f32;
     //let dt = 1e-3 / STEPS as f32;
     for _ in 0..STEPS {
-        for (node, mut integration, mut transform) in nodes.iter_mut() {
+        for (_, node, mut integration, mut transform) in nodes.iter_mut() {
             if *node == Node::Moving {
                 let mut rs = [Vec2::ZERO; 6];
                 rs[0] = transform.translation.xy();
                 rs[1..].copy_from_slice(integration.rs.as_slice());
                 let predictor = GearPredictor { rs };
-                let acceleration = vec2(0.0, -0.098);
                 let predicted = predictor.predict(dt);
-                let corrected = predicted.correct(acceleration, dt);
+                integration.rs.copy_from_slice(&predicted.predictions[1..]);
+                transform.translation.x = predicted.predictions[0].x;
+                transform.translation.y = predicted.predictions[0].y;
+            }
+        }
+        let mut accelerations =
+            HashMap::from_iter(nodes.iter().map(|(node, ..)| (node, Vec2::ZERO)));
+
+        // Add gravity
+        accelerations.iter_mut().for_each(|(_, acceleration)| {
+            *acceleration += vec2(0.0, -0.098);
+        });
+
+        for (entity, node, mut integration, mut transform) in nodes.iter_mut() {
+            if *node == Node::Moving {
+                let mut predictions = [Vec2::ZERO; 6];
+                predictions[0] = transform.translation.xy();
+                predictions[1..].copy_from_slice(integration.rs.as_slice());
+                let predicted = GearCorrector { predictions };
+                let corrected = predicted.correct(accelerations[&entity], dt);
                 integration.rs.copy_from_slice(&corrected[1..]);
                 transform.translation.x = corrected[0].x;
                 transform.translation.y = corrected[0].y;
