@@ -1,6 +1,7 @@
 use bevy::math::{vec2, vec3, Vec3Swizzles};
 use bevy::prelude::*;
 use bevy::sprite::MaterialMesh2dBundle;
+use gear_predictor_corrector::GearPredictor;
 
 #[derive(Component, PartialEq, Eq)]
 enum Node {
@@ -10,6 +11,11 @@ enum Node {
 
 #[derive(Component)]
 struct Edge(Entity, Entity);
+
+#[derive(Component, Default)]
+struct Integration {
+    rs: [Vec2; 5],
+}
 
 fn generate_grid_mesh(
     start: Vec2,
@@ -59,6 +65,7 @@ fn add_nodes(
                     ..default()
                 },
                 node_type,
+                Integration::default(),
             ))
             .id()
     };
@@ -100,10 +107,24 @@ fn add_camera(mut commands: Commands) {
     });
 }
 
-fn update_nodes(time: Res<Time>, mut nodes: Query<(&Node, &mut Transform)>) {
-    for (node, mut transform) in nodes.iter_mut() {
-        if *node == Node::Moving {
-            transform.translation.y -= time.delta_seconds() * 0.01;
+fn update_nodes(time: Res<Time>, mut nodes: Query<(&Node, &mut Integration, &mut Transform)>) {
+    const STEPS: usize = 100;
+    let dt = time.delta_seconds().max(1e-6) / STEPS as f32;
+    //let dt = 1e-3 / STEPS as f32;
+    for _ in 0..STEPS {
+        for (node, mut integration, mut transform) in nodes.iter_mut() {
+            if *node == Node::Moving {
+                let mut rs = [Vec2::ZERO; 6];
+                rs[0] = transform.translation.xy();
+                rs[1..].copy_from_slice(integration.rs.as_slice());
+                let predictor = GearPredictor { rs };
+                let acceleration = vec2(0.0, -0.098);
+                let predicted = predictor.predict(dt);
+                let corrected = predicted.correct(acceleration, dt);
+                integration.rs.copy_from_slice(&corrected[1..]);
+                transform.translation.x = corrected[0].x;
+                transform.translation.y = corrected[0].y;
+            }
         }
     }
 }
