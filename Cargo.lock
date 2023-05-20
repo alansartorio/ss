@@ -1897,6 +1897,9 @@ dependencies = [
 [[package]]
 name = "gear_predictor_corrector"
 version = "0.1.0"
+dependencies = [
+ "num-traits",
+]
 
 [[package]]
 name = "generator"
