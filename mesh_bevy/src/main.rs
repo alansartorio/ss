@@ -139,7 +139,23 @@ fn update_nodes(
     mut commands: Commands,
     mut nodes: Query<(Entity, &Node, &mut Integration, &mut Transform, &Weight)>,
     edges: Query<(Entity, &Edge)>,
+    window: Query<&Window>,
+    camera_q: Query<(&Camera, &GlobalTransform)>,
+    buttons: Res<Input<MouseButton>>,
 ) {
+    let cursor = buttons
+        .pressed(MouseButton::Left)
+        .then(|| window.single().cursor_position())
+        .flatten()
+        .map(|cursor| {
+            let (camera, camera_transform) = camera_q.single();
+            camera
+                .viewport_to_world(camera_transform, cursor)
+                .unwrap()
+                .origin
+                .truncate()
+        });
+
     const STEPS: usize = 100;
     //let dt = time.delta_seconds().max(1e-6) / STEPS as f32;
     let dt = 1e-2 / STEPS as f32;
@@ -183,6 +199,15 @@ fn update_nodes(
                 }
 
                 *accelerations.get_mut(node1).unwrap() -= velocity * 0.01 / weight1;
+
+                if let Some(cursor) = cursor {
+                    let delta = position1 - cursor;
+                    let magnitude = delta.length();
+                    if magnitude > 0.0001 {
+                        *accelerations.get_mut(node1).unwrap() += (delta / magnitude)
+                            * (smoothstep(magnitude, 0.03, 0.0).powi(4) * 0.2 / weight1);
+                    }
+                }
             }
         }
 
