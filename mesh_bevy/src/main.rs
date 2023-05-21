@@ -156,10 +156,8 @@ fn update_nodes(
                 .truncate()
         });
 
-    const STEPS: usize = 100;
-    //let dt = time.delta_seconds().max(1e-6) / STEPS as f32;
-    let dt = 1e-2 / STEPS as f32;
-    //let dt = 1e-3 / STEPS as f32;
+    const STEPS: usize = 10;
+    let dt = time.delta_seconds().max(1e-6) / STEPS as f32;
     let mut deleted_edges = HashSet::new();
     for _ in 0..STEPS {
         for (_, node, mut integration, mut transform, _) in nodes.iter_mut() {
