@@ -1,7 +1,7 @@
 use bevy::math::{vec2, vec3, Vec3Swizzles};
 use bevy::prelude::*;
 use bevy::sprite::MaterialMesh2dBundle;
-use bevy::utils::HashMap;
+use bevy::utils::{HashMap, HashSet};
 use gear_predictor_corrector::{GearCorrector, GearPredictor};
 use ndarray::Array2;
 
@@ -12,11 +12,29 @@ enum Node {
 }
 
 #[derive(Component)]
+struct Weight(f32);
+
+#[derive(Component)]
 struct Edge(Entity, Entity);
 
 #[derive(Component, Default)]
 struct Integration {
     rs: [Vec2; 5],
+}
+
+const K: f32 = 1e3;
+
+fn link_force(position1: Vec2, position2: Vec2, natural_length: f32) -> Option<Vec2> {
+    let delta = position2 - position1;
+    let dist = delta.length();
+    let expansion = dist - natural_length;
+    //dbg!(expansion);
+    if expansion > 0.0 {
+        let force = K * expansion;
+        (force < 0.3).then(|| force * (delta / dist))
+    } else {
+        Some(Vec2::ZERO)
+    }
 }
 
 fn generate_grid_mesh(
@@ -52,7 +70,7 @@ fn add_nodes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let (nodes, edges) = generate_grid_mesh(vec2(-0.05, 0.1), vec2(0.05, 0.0), 10, 10);
+    let (nodes, edges) = generate_grid_mesh(vec2(-0.05, 0.1), vec2(0.05, 0.0), 11, 11);
 
     let mut add_node = |pos: Vec2, node_type: Node| {
         commands
@@ -67,6 +85,7 @@ fn add_nodes(
                     ..default()
                 },
                 node_type,
+                Weight(0.01),
                 Integration::default(),
             ))
             .id()
@@ -109,16 +128,25 @@ fn add_camera(mut commands: Commands) {
     });
 }
 
+fn smoothstep(x: f32, start: f32, end: f32) -> f32 {
+    let x = ((x - start) / (end - start)).clamp(0.0, 1.0);
+
+    x * x * (3.0 - 2.0 * x)
+}
+
 fn update_nodes(
     time: Res<Time>,
-    mut nodes: Query<(Entity, &Node, &mut Integration, &mut Transform)>,
-    mut edges: Query<&Edge>,
+    mut commands: Commands,
+    mut nodes: Query<(Entity, &Node, &mut Integration, &mut Transform, &Weight)>,
+    edges: Query<(Entity, &Edge)>,
 ) {
     const STEPS: usize = 100;
-    let dt = time.delta_seconds().max(1e-6) / STEPS as f32;
+    //let dt = time.delta_seconds().max(1e-6) / STEPS as f32;
+    let dt = 1e-2 / STEPS as f32;
     //let dt = 1e-3 / STEPS as f32;
+    let mut deleted_edges = HashSet::new();
     for _ in 0..STEPS {
-        for (_, node, mut integration, mut transform) in nodes.iter_mut() {
+        for (_, node, mut integration, mut transform, _) in nodes.iter_mut() {
             if *node == Node::Moving {
                 let mut rs = [Vec2::ZERO; 6];
                 rs[0] = transform.translation.xy();
@@ -138,7 +166,27 @@ fn update_nodes(
             *acceleration += vec2(0.0, -0.098);
         });
 
-        for (entity, node, mut integration, mut transform) in nodes.iter_mut() {
+        for (entity, Edge(node1, node2)) in edges.iter() {
+            if !deleted_edges.contains(&entity) {
+                let (_, _, integration, transform1, &Weight(weight1)) = nodes.get(*node1).unwrap();
+                let (_, _, _, transform2, &Weight(weight2)) = nodes.get(*node2).unwrap();
+                let position1 = transform1.translation.xy();
+                let position2 = transform2.translation.xy();
+                let velocity = integration.rs[0];
+
+                if let Some(link_force) = link_force(position1, position2, 0.01) {
+                    *accelerations.get_mut(node1).unwrap() += link_force / weight1;
+                    *accelerations.get_mut(node2).unwrap() -= link_force / weight2;
+                } else {
+                    commands.entity(entity).despawn();
+                    deleted_edges.insert(entity);
+                }
+
+                *accelerations.get_mut(node1).unwrap() -= velocity * 0.01 / weight1;
+            }
+        }
+
+        for (entity, node, mut integration, mut transform, _) in nodes.iter_mut() {
             if *node == Node::Moving {
                 let mut predictions = [Vec2::ZERO; 6];
                 predictions[0] = transform.translation.xy();
