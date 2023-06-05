@@ -23,6 +23,7 @@ struct Integration {
 }
 
 const K: f32 = 1e3;
+const MESH_SIZE: usize = 20;
 
 fn link_force(position1: Vec2, position2: Vec2, natural_length: f32) -> Option<Vec2> {
     let delta = position2 - position1;
@@ -70,7 +71,12 @@ fn add_nodes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let (nodes, edges) = generate_grid_mesh(vec2(-0.05, 0.1), vec2(0.05, 0.0), 11, 11);
+    let (nodes, edges) = generate_grid_mesh(
+        vec2(-0.05, 0.1),
+        vec2(0.05, 0.0),
+        MESH_SIZE + 1,
+        MESH_SIZE + 1,
+    );
 
     let mut add_node = |pos: Vec2, node_type: Node| {
         commands
@@ -85,7 +91,7 @@ fn add_nodes(
                     ..default()
                 },
                 node_type,
-                Weight(0.01),
+                Weight(0.001),
                 Integration::default(),
             ))
             .id()
@@ -156,8 +162,8 @@ fn update_nodes(
                 .truncate()
         });
 
-    const STEPS: usize = 10;
-    let dt = time.delta_seconds().max(1e-6) / STEPS as f32;
+    const STEPS: usize = 1000;
+    let dt = time.delta_seconds().max(1e-3) / STEPS as f32;
     let mut deleted_edges = HashSet::new();
     for _ in 0..STEPS {
         for (_, node, mut integration, mut transform, _) in nodes.iter_mut() {
@@ -177,7 +183,7 @@ fn update_nodes(
 
         // Add gravity
         accelerations.iter_mut().for_each(|(_, acceleration)| {
-            *acceleration += vec2(0.0, -0.098);
+            *acceleration += vec2(0.0, -0.98);
         });
 
         for (entity, Edge(node1, node2)) in edges.iter() {
@@ -188,7 +194,8 @@ fn update_nodes(
                 let position2 = transform2.translation.xy();
                 let velocity = integration.rs[0];
 
-                if let Some(link_force) = link_force(position1, position2, 0.01) {
+                if let Some(link_force) = link_force(position1, position2, 0.10 / MESH_SIZE as f32)
+                {
                     *accelerations.get_mut(node1).unwrap() += link_force / weight1;
                     *accelerations.get_mut(node2).unwrap() -= link_force / weight2;
                 } else {
